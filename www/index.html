@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Quest UI</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#0b0d12;color:#fff;font-family:system-ui,sans-serif}
+#cam,#fx{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#cam{opacity:.55}#cam.mir{transform:scaleX(-1)}
+#fx{pointer-events:none;z-index:5}
+#start{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#1c2540,#0b0d12)}
+.card{width:min(92vw,520px);padding:24px;border-radius:28px;background:rgba(255,255,255,.07);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12)}
+h1{margin:0 0 6px;font-size:22px}p{margin:0 0 14px;opacity:.7;font-size:14px}
+input{width:100%;padding:14px 16px;border-radius:16px;border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.35);color:#fff;font-size:16px;outline:0}
+.btn{border:0;color:#fff;font-size:16px;font-weight:600;padding:13px 20px;border-radius:999px;background:rgba(255,255,255,.14);transition:.12s}
+.btn.hot{background:#3b82f6;transform:scale(1.08)}
+#go{width:100%;margin-top:14px;background:#2563eb}
+.win{position:fixed;z-index:10;border-radius:28px;background:rgba(18,22,32,.78);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden}
+.bar{height:34px;display:flex;align-items:center;justify-content:center;position:relative;cursor:grab}
+.bar::before{content:"";width:64px;height:6px;border-radius:9px;background:rgba(255,255,255,.4)}
+.bar .x{position:absolute;right:8px;top:2px;width:30px;height:30px;padding:0;font-size:14px}
+#menu{left:20%;top:12%;width:360px}
+#menu .row{display:flex;flex-wrap:wrap;gap:10px;padding:10px 16px 18px;justify-content:center}
+#menu .btn{flex:1 1 40%;min-width:130px}
+#st{text-align:center;font-size:12px;opacity:.6;padding-bottom:10px}
+#app{left:8%;top:6%;width:62%;height:84%;display:none;flex-direction:column}
+#app iframe{flex:1;border:0;width:100%;background:#000}
+#cur{position:fixed;z-index:99;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid #fff;pointer-events:none;display:none;transition:transform .08s,background .08s}
+#cur.p{background:rgba(59,130,246,.8);transform:scale(.6)}
+</style></head><body>
+<video id="cam" playsinline muted autoplay></video><canvas id="fx"></canvas>
+
+<div id="start"><div class="card">
+<h1>Quest UI</h1><p>Cole um link do YouTube ou Google (ou digite uma busca) e toque em Iniciar.</p>
+<input id="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off">
+<button class="btn" id="go">Iniciar</button></div></div>
+
+<div id="menu" class="win" style="display:none">
+<div class="bar drag"></div>
+<div class="row">
+<button class="btn" data-a="open">▶ Abrir link</button>
+<button class="btn" data-a="close">✕ Fechar aba</button>
+<button class="btn" data-a="center">⌖ Centralizar</button>
+<button class="btn" data-a="cam">⟳ Câmera</button>
+<button class="btn" data-a="exit" style="flex-basis:100%">⏻ Sair</button>
+</div><div id="st">carregando mãos…</div></div>
+
+<div id="app" class="win"><div class="bar drag"><button class="btn x" data-a="close">✕</button></div>
+<iframe id="fr" allow="autoplay; encrypted-media; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>
+<div id="cur"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+const $=id=>document.getElementById(id);
+const cam=$('cam'),fx=$('fx'),ctx=fx.getContext('2d'),cur=$('cur'),st=$('st');
+let link=localStorage.getItem('link')||'',facing='user',stream=null,running=false,hands=null;
+$('url').value=link;
+
+/* ---- link -> URL / embed do YouTube ---- */
+function norm(s){s=s.trim();if(!s)return'';if(/^https?:\/\//i.test(s))return s;
+ if(!/\s/.test(s)&&/\.\w{2,}/.test(s))return'https://'+s;
+ return'https://www.google.com/search?q='+encodeURIComponent(s)}
+function ytEmbed(u){try{const x=new URL(u),h=x.hostname.replace('www.','').replace('m.','');
+ let id=null;
+ if(h==='youtu.be')id=x.pathname.slice(1);
+ else if(h.endsWith('youtube.com')){
+  if(x.pathname==='/watch')id=x.searchParams.get('v');
+  else if(/^\/(shorts|embed|live)\//.test(x.pathname))id=x.pathname.split('/')[2];
+  else if(x.pathname==='/playlist'&&x.searchParams.get('list'))return'https://www.youtube.com/embed/videoseries?list='+x.searchParams.get('list');}
+ return id?'https://www.youtube.com/embed/'+id+'?rel=0&playsinline=1':null}catch(e){return null}}
+function openLink(){
+ const u=norm(link);if(!u){st.textContent='nenhum link definido';return}
+ const e=ytEmbed(u);
+ if(e){$('fr').src=e;$('app').style.display='flex'}
+ else{const B=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.Browser;
+  B?B.open({url:u}):window.open(u,'_blank')}}
+function closeApp(){$('fr').src='about:blank';$('app').style.display='none'}
+
+/* ---- ações do menu ---- */
+const act={
+ open:openLink,close:closeApp,
+ center(){const m=$('menu');m.style.left=(innerWidth-m.offsetWidth)/2+'px';m.style.top=innerHeight*.12+'px'},
+ cam(){facing=facing==='user'?'environment':'user';startCam()},
+ exit(){running=false;closeApp();stopCam();$('menu').style.display='none';$('start').style.display='flex';cur.style.display='none'}};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b)act[b.dataset.a]()});
+
+$('go').onclick=async()=>{link=$('url').value;localStorage.setItem('link',link);
+ $('start').style.display='none';$('menu').style.display='block';act.center();running=true;
+ await startCam();if(!hands)initHands();loop()};
+
+/* ---- câmera ---- */
+async function startCam(){stopCam();
+ try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:640,height:480},audio:false});
+  cam.srcObject=stream;cam.classList.toggle('mir',facing==='user');await cam.play()}
+ catch(e){st.textContent='sem câmera: '+e.message}}
+function stopCam(){stream&&stream.getTracks().forEach(t=>t.stop());stream=null}
+
+/* ---- MediaPipe Hands ---- */
+function initHands(){
+ hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+ hands.setOptions({maxNumHands:1,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});
+ hands.onResults(onHand)}
+async function loop(){if(!running)return;
+ if(cam.readyState>=2&&hands){try{await hands.send({image:cam})}catch(e){}}
+ requestAnimationFrame(loop)}
+
+let sx=0,sy=0,pinch=false,drag=null,hot=null,lost=0;
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function map(p){ // landmark -> tela (object-fit:cover + espelho)
+ const vw=cam.videoWidth||640,vh=cam.videoHeight||480,W=innerWidth,H=innerHeight,s=Math.max(W/vw,H/vh);
+ let nx=facing==='user'?1-p.x:p.x;
+ return{x:nx*vw*s-(vw*s-W)/2,y:p.y*vh*s-(vh*s-H)/2}}
+
+function onHand(r){
+ fx.width=innerWidth;fx.height=innerHeight;ctx.clearRect(0,0,fx.width,fx.height);
+ const l=r.multiHandLandmarks&&r.multiHandLandmarks[0];
+ if(!l){if(++lost>6){cur.style.display='none';endPinch()}st.textContent='mostre a mão';return}
+ lost=0;st.textContent='pinça: polegar + indicador';
+ ctx.fillStyle='rgba(255,255,255,.7)';
+ l.forEach(p=>{const m=map(p);ctx.beginPath();ctx.arc(m.x,m.y,3,0,7);ctx.fill()});
+ const a=map(l[4]),b=map(l[8]),x=(a.x+b.x)/2,y=(a.y+b.y)/2;
+ sx+=(x-sx)*.45;sy+=(y-sy)*.45;
+ cur.style.display='block';cur.style.left=sx+'px';cur.style.top=sy+'px';
+ const ratio=d(l[4],l[8])/d(l[0],l[9]);
+ if(!pinch&&ratio<.28){pinch=true;startPinch()}
+ else if(pinch&&ratio>.42){endPinch()}
+ cur.classList.toggle('p',pinch);
+ if(drag){drag.el.style.left=sx-drag.ox+'px';drag.el.style.top=sy-drag.oy+'px'}
+ else{ // hover
+  const t=pick();hot&&hot!==t&&hot.classList.remove('hot');hot=t;t&&t.classList.add('hot')}}
+
+function pick(){cur.style.display='none';const e=document.elementFromPoint(sx,sy);cur.style.display='block';
+ return e&&e.closest('.btn')}
+function startPinch(){
+ cur.style.display='none';const e=document.elementFromPoint(sx,sy);cur.style.display='block';if(!e)return;
+ const btn=e.closest('.btn');if(btn){btn.click();return}
+ const bar=e.closest('.drag');if(bar){const w=bar.closest('.win'),r=w.getBoundingClientRect();
+  drag={el:w,ox:sx-r.left,oy:sy-r.top}}}
+function endPinch(){pinch=false;drag=null}
+addEventListener('resize',()=>{fx.width=innerWidth;fx.height=innerHeight});
+</script></body></html>

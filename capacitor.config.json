@@ -1,0 +1,6 @@
+{
+  "appId": "com.crie.questui",
+  "appName": "Quest UI",
+  "webDir": "www",
+  "android": { "allowMixedContent": true }
+}
